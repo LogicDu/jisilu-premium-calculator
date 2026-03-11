@@ -4,6 +4,21 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 并且本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+## [1.3.1] - 2026-03-11
+
+### 修复
+
+- 🐛 **关键修复**：修复 QDII 页面"商品"表格不显示溢价率列的问题
+  - 原因：QDII 页面的 `#qdiie` hash 下有两个表格（欧美指数和商品），但脚本只处理了第一个表格
+  - 解决：修改配置结构支持一个 hash 对应多个表格，并遍历初始化所有表格
+  - 相关 Issue: [#1](https://github.com/LogicDu/jisilu-premium-calculator/issues/1)
+
+### 改进
+
+- 🔧 重构 `getCurrentTableConfig()` 返回表格配置数组
+- 🔧 重构 `initCurrentTable()` 支持遍历初始化多个表格
+- 🔧 为每个表格创建独立的 MutationObserver
+- 🔧 排序状态改为按表格 ID 独立存储
 
 ## [1.3.0] - 2026-03-11
 

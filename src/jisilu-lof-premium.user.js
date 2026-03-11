@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         集思录溢价率计算
 // @namespace    https://github.com/LogicDu/jisilu-premium-calculator
-// @version      1.3.0
-// @description  在集思录LOF/QDII基金页面自动计算并显示溢价率，支持排序
+// @version      1.3.1
+// @description  在集思录 LOF/QDII 基金页面自动计算并显示溢价率，支持排序
 // @author       LogicDu
 // @match        https://www.jisilu.cn/data/lof/*
 // @match        https://www.jisilu.cn/data/qdii/*
@@ -14,26 +14,11 @@
 // @updateURL    https://github.com/LogicDu/jisilu-premium-calculator/raw/main/src/jisilu-lof-premium.user.js
 // @downloadURL  https://github.com/LogicDu/jisilu-premium-calculator/raw/main/src/jisilu-lof-premium.user.js
 // ==/UserScript==
-// @name         集思录溢价率计算
-// @namespace    https://github.com/yourusername/jisilu-lof-premium
-// @version      1.3.0
-// @description  在集思录LOF/QDII基金页面自动计算并显示溢价率，支持排序
-// @author       Your Name
-// @match        https://www.jisilu.cn/data/lof/*
-// @match        https://www.jisilu.cn/data/qdii/*
-// @icon         https://www.jisilu.cn/favicon.ico
-// @grant        none
-// @license      MIT
-// @homepage     https://github.com/yourusername/jisilu-lof-premium
-// @supportURL   https://github.com/yourusername/jisilu-lof-premium/issues
-// @updateURL    https://github.com/yourusername/jisilu-lof-premium/raw/main/src/jisilu-lof-premium.user.js
-// @downloadURL  https://github.com/yourusername/jisilu-lof-premium/raw/main/src/jisilu-lof-premium.user.js
-// ==/UserScript==
 
 (function() {
     'use strict';
 
-    console.log('[集思录溢价率] 脚本已加载 v1.3.0');
+    console.log('[集思录溢价率] 脚本已加载 v1.3.1');
 
     // 通用配置
     const CONFIG = {
@@ -44,7 +29,8 @@
         DECIMAL_PLACES: 2,          // 小数位数
     };
 
-    // 页面配置：根据路径和hash获取表格ID和列索引
+    // 页面配置：根据路径和 hash 获取表格 ID 和列索引
+    // 注意：一个 hash 可能对应多个表格（如 QDII 页面的#qdiie 包含欧美指数和商品两个表）
     const PAGE_CONFIG = {
         '/data/lof/': {
             tables: {
@@ -56,8 +42,11 @@
         },
         '/data/qdii/': {
             tables: {
-                '#qdiie': { id: 'flex_qdiie', priceIndex: 2, navIndex: 7 },
-                '#qdiic': { id: 'flex_qdiic', priceIndex: 2, navIndex: 7 },
+                // #qdiie hash 下有两个表格：欧美指数和商品
+                '#qdiie': [
+                    { id: 'flex_qdiie', priceIndex: 2, navIndex: 7 },  // 欧美指数
+                    { id: 'flex_qdiic', priceIndex: 2, navIndex: 7 }   // 商品
+                ],
                 '#qdiia': { id: 'flex_qdiia', priceIndex: 2, navIndex: 7 },
             },
             defaultTable: 'flex_qdiie'
@@ -65,10 +54,10 @@
     };
 
     // 当前状态
-    let currentTableConfig = null;
-    let currentTableId = null;
-    let currentObserver = null;
-    let sortState = null;
+    let currentTableConfigs = [];  // 当前 hash 对应的所有表格配置（数组）
+    let currentTableIds = [];      // 当前 hash 对应的所有表格 ID（数组）
+    let currentObservers = {};     // 每个表格独立的 observer，key 为 tableId
+    let sortState = {};
 
     /**
      * 获取当前页面路径
@@ -76,7 +65,6 @@
      */
     function getCurrentPath() {
         const pathname = window.location.pathname;
-        // 匹配路径，如 /data/lof/ 或 /data/qdii/
         if (pathname.includes('/data/lof')) {
             return '/data/lof/';
         } else if (pathname.includes('/data/qdii')) {
@@ -87,7 +75,7 @@
 
     /**
      * 获取当前表格配置
-     * @returns {Object|null}
+     * @returns {Array|null} 返回表格配置数组（一个 hash 可能对应多个表格）
      */
     function getCurrentTableConfig() {
         const path = getCurrentPath();
@@ -99,29 +87,24 @@
         const hash = window.location.hash || Object.keys(pageConfig.tables)[0];
         
         if (pageConfig.tables[hash]) {
-            return pageConfig.tables[hash];
+            // 如果是数组（多表格），直接返回；如果是对象（单表格），转为数组
+            return Array.isArray(pageConfig.tables[hash]) 
+                ? pageConfig.tables[hash] 
+                : [pageConfig.tables[hash]];
         }
 
-        // 返回默认表格配置
-        return pageConfig.tables[Object.keys(pageConfig.tables)[0]];
+        // 返回默认表格配置（转为数组）
+        const defaultConfig = pageConfig.tables[Object.keys(pageConfig.tables)[0]];
+        return defaultConfig ? [defaultConfig] : null;
     }
 
     /**
-     * 获取当前激活的表格ID
-     * @returns {string|null}
+     * 获取当前激活的表格 ID 列表
+     * @returns {Array<string>|null}
      */
-    function getActiveTableId() {
-        const config = getCurrentTableConfig();
-        return config ? config.id : null;
-    }
-
-    /**
-     * 获取当前激活的表格元素
-     * @returns {HTMLTableElement|null}
-     */
-    function getActiveTable() {
-        const tableId = getActiveTableId();
-        return tableId ? document.querySelector(`#${tableId}`) : null;
+    function getActiveTableIds() {
+        const configs = getCurrentTableConfig();
+        return configs ? configs.map(cfg => cfg.id) : null;
     }
 
     /**
@@ -176,13 +159,13 @@
 
         const thead = table.querySelector('thead');
         if (!thead) {
-            console.log('[集思录溢价率] 未找到thead');
+            console.log('[集思录溢价率] 未找到 thead');
             return false;
         }
 
         // 获取第二行（实际的表头行）
         const theadRows = thead.querySelectorAll('tr');
-        const headerRow = theadRows[1]; // 第二行是真正的表头
+        const headerRow = theadRows[1];
         
         if (!headerRow) {
             console.log('[集思录溢价率] 未找到表头行');
@@ -261,18 +244,20 @@
      * @param {Object} tableConfig - 表格配置
      */
     function handleSortClick(table, tableConfig) {
+        const tableId = table.id;
+        
         // 切换排序状态
-        if (sortState === null) {
-            sortState = 'desc';
-        } else if (sortState === 'desc') {
-            sortState = 'asc';
+        if (!sortState[tableId]) {
+            sortState[tableId] = 'desc';
+        } else if (sortState[tableId] === 'desc') {
+            sortState[tableId] = 'asc';
         } else {
-            sortState = null;
+            sortState[tableId] = null;
         }
 
         updateSortIndicator(table);
 
-        if (sortState !== null) {
+        if (sortState[tableId] !== null) {
             sortTable(table, tableConfig);
         } else {
             processAllRows(table, tableConfig);
@@ -291,8 +276,8 @@
         if (!indicator) return;
 
         indicator.classList.remove('asc', 'desc');
-        if (sortState) {
-            indicator.classList.add(sortState);
+        if (sortState[table.id]) {
+            indicator.classList.add(sortState[table.id]);
         }
     }
 
@@ -317,17 +302,17 @@
             const aRate = aCell ? parseFloat(aCell.getAttribute('data-premium-rate')) : NaN;
             const bRate = bCell ? parseFloat(bCell.getAttribute('data-premium-rate')) : NaN;
 
-            // null值排在最后
+            // null 值排在最后
             if (isNaN(aRate) && isNaN(bRate)) return 0;
             if (isNaN(aRate)) return 1;
             if (isNaN(bRate)) return -1;
 
-            return sortState === 'asc' ? aRate - bRate : bRate - aRate;
+            return sortState[table.id] === 'asc' ? aRate - bRate : bRate - aRate;
         });
 
         rows.forEach(row => tbody.appendChild(row));
 
-        console.log(`[集思录溢价率] 已按溢价率${sortState === 'asc' ? '升序' : '降序'}排序`);
+        console.log(`[集思录溢价率] 已按溢价率${sortState[table.id] === 'asc' ? '升序' : '降序'}排序`);
     }
 
     /**
@@ -402,15 +387,11 @@
      * 监听表格变化
      * @param {HTMLTableElement} table - 表格元素
      * @param {Object} tableConfig - 表格配置
+     * @param {string} tableId - 表格 ID（用于区分多个表格的 observer）
      */
-    function observeTableChanges(table, tableConfig) {
+    function observeTableChanges(table, tableConfig, tableId) {
         if (!table) {
             return;
-        }
-
-        // 断开之前的观察器
-        if (currentObserver) {
-            currentObserver.disconnect();
         }
 
         const tbody = table.querySelector('tbody');
@@ -418,8 +399,8 @@
             return;
         }
 
-        // 创建观察器
-        currentObserver = new MutationObserver((mutations) => {
+        // 创建观察器并保存到对应 tableId 下
+        const observer = new MutationObserver((mutations) => {
             mutations.forEach((mutation) => {
                 if (mutation.type === 'childList') {
                     mutation.addedNodes.forEach((node) => {
@@ -432,33 +413,53 @@
         });
 
         // 开始观察
-        currentObserver.observe(tbody, { childList: true, subtree: true });
-        console.log('[集思录溢价率] 已启动表格监听');
+        observer.observe(tbody, { childList: true, subtree: true });
+        currentObservers[tableId] = observer;
+        console.log(`[集思录溢价率] 已启动表格 #${tableId} 监听`);
     }
 
     /**
-     * 初始化当前表格
+     * 初始化当前 hash 对应的所有表格
      */
     function initCurrentTable() {
-        const tableConfig = getCurrentTableConfig();
+        const tableConfigs = getCurrentTableConfig();
         
-        if (!tableConfig) {
+        if (!tableConfigs || tableConfigs.length === 0) {
             console.log('[集思录溢价率] 当前页面不支持');
             return;
         }
 
-        const tableId = tableConfig.id;
+        const tableIds = tableConfigs.map(cfg => cfg.id);
         
-        // 如果表格ID没有变化，不重复初始化
-        if (currentTableId === tableId) {
+        // 如果表格 ID 列表没有变化，不重复初始化
+        if (JSON.stringify(currentTableIds) === JSON.stringify(tableIds)) {
+            console.log('[集思录溢价率] 表格配置未变化，跳过初始化');
             return;
         }
         
-        console.log(`[集思录溢价率] 切换到表格: #${tableId}`);
-        currentTableId = tableId;
-        currentTableConfig = tableConfig;
-        sortState = null;
+        console.log(`[集思录溢价率] 切换到表格：${tableIds.join(', ')}`);
+        currentTableIds = tableIds;
+        currentTableConfigs = tableConfigs;
+        sortState = {};
+        
+        // 清理旧的 observer
+        Object.values(currentObservers).forEach(obs => obs.disconnect());
+        currentObservers = {};
 
+        // 为每个表格单独初始化
+        tableConfigs.forEach((tableConfig, index) => {
+            const tableId = tableConfig.id;
+            console.log(`[集思录溢价率] 开始初始化表格 #${index + 1}/${tableConfigs.length}: #${tableId}`);
+            initSingleTable(tableId, tableConfig);
+        });
+    }
+
+    /**
+     * 初始化单个表格
+     * @param {string} tableId - 表格 ID
+     * @param {Object} tableConfig - 表格配置
+     */
+    function initSingleTable(tableId, tableConfig) {
         // 等待表格加载
         const checkTable = setInterval(() => {
             const table = document.querySelector(`#${tableId}`);
@@ -471,28 +472,28 @@
             const computedStyle = table ? window.getComputedStyle(table) : null;
             const isVisible = computedStyle && computedStyle.display !== 'none';
             
-            // 检查tbody是否有有效数据行（排除登录提示等）
+            // 检查 tbody 是否有有效数据行（排除登录提示等）
             const hasData = tbody && tbody.querySelector('tr') && 
                            !tbody.querySelector('tr').textContent.includes('登录');
             
             if (table && isVisible && headerRow && hasData) {
                 clearInterval(checkTable);
                 
-                console.log('[集思录溢价率] 表格已找到，开始处理');
+                console.log(`[集思录溢价率] 表格 #${tableId} 已找到，开始处理`);
 
                 if (addPremiumColumnHeader(table, tableConfig)) {
                     processAllRows(table, tableConfig);
-                    observeTableChanges(table, tableConfig);
+                    observeTableChanges(table, tableConfig, tableId);
                 }
                 
-                console.log('[集思录溢价率] 初始化完成');
+                console.log(`[集思录溢价率] 表格 #${tableId} 初始化完成`);
             }
         }, 500);
 
-        // 10秒后停止检查
+        // 10 秒后停止检查
         setTimeout(() => {
             clearInterval(checkTable);
-            console.log('[集思录溢价率] 初始化检查结束');
+            console.log(`[集思录溢价率] 表格 #${tableId} 初始化检查结束`);
         }, 10000);
     }
 
@@ -505,9 +506,9 @@
         // 初始化当前表格
         initCurrentTable();
         
-        // 监听hash变化，切换表格时重新初始化
+        // 监听 hash 变化，切换表格时重新初始化
         window.addEventListener('hashchange', () => {
-            console.log('[集思录溢价率] 检测到hash变化');
+            console.log('[集思录溢价率] 检测到 hash 变化');
             initCurrentTable();
         });
     }
