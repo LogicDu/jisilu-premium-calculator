@@ -97,7 +97,10 @@ coverage/
 *.backup
 *~
 
-# Package manager lock files (optional, uncomment if needed)
-# package-lock.json
-# yarn.lock
 # pnpm-lock.yaml
+
+# Offline installation files
+# These are distributed via releases, not source control
+docs/How_To_Install_Offline/
+*.crx
+*.zip
