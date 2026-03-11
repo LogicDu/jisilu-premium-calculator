@@ -1,0 +1,32 @@
+{
+  "name": "jisilu-premium-calculator",
+  "version": "1.3.0",
+  "description": "A Tampermonkey script that automatically calculates and displays fund premium rates on Jisilu LOF/QDII pages",
+  "main": "src/jisilu-lof-premium.user.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LogicDu/jisilu-premium-calculator.git"
+  },
+  "keywords": [
+    "tampermonkey",
+    "userscript",
+    "jisilu",
+    "lof",
+    "qdii",
+    "fund",
+    "premium",
+    "集思录",
+    "基金",
+    "溢价率"
+  ],
+  "author": "LogicDu",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/LogicDu/jisilu-premium-calculator/issues"
+  },
+  "homepage": "https://github.com/LogicDu/jisilu-premium-calculator#readme",
+  "packageManager": "pnpm@10.6.5+sha512.cdf928fca20832cd59ec53826492b7dc25dc524d4370b6b4adbf65803d32efaa6c1c88147c0ae4e8d579a6c9eec715757b50d4fa35eea179d868eada4ed043af"
+}
