@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         集思录溢价率计算
 // @namespace    https://github.com/LogicDu/jisilu-premium-calculator
-// @version      1.5.1
+// @version      1.6.0
 // @author       LogicDu
 // @match        https://www.jisilu.cn/data/lof/*
 // @match        https://www.jisilu.cn/data/qdii/*
@@ -15,7 +15,7 @@
 // ==/UserScript==
 (function() {
     'use strict';
-    console.log('[集思录溢价率] 脚本已加载 v1.5.1 (修复页面跳转问题)');
+    console.log('[集思录溢价率] 脚本已加载 v1.6.0 (性能优化版)');
     
     // 检查 GM_xmlhttpRequest 是否存在（防止在非Tampermonkey环境下报错）
     if (typeof GM_xmlhttpRequest === 'undefined') {
@@ -36,7 +36,10 @@
         NEGATIVE_COLOR: '#00aa00',
         DECIMAL_PLACES: 2,
         ESTIMATE_API: 'https://fundgz.1234567.com.cn/js/',
-        CACHE_DURATION: 60000,
+        CACHE_DURATION: 60000,           // 缓存时长（毫秒）：60秒
+        // 性能优化配置
+        MAX_CONCURRENT_REQUESTS: 5,      // 最大并发请求数
+        STORAGE_KEY: 'jisilu_estimate_cache',  // localStorage 键名
         // 调试配置
         DEBUG_MODE: true,
         SHOW_DEBUG_PANEL: true,
@@ -73,6 +76,78 @@
     let debugData = {};
     let debugPanelVisible = false;
     let selectedFundCode = null;
+    
+    // ==================== 请求队列（并发控制） ====================
+    class RequestQueue {
+        constructor(maxConcurrent) {
+            this.queue = [];
+            this.active = 0;
+            this.maxConcurrent = maxConcurrent;
+        }
+        
+        async add(requestFn) {
+            // 如果当前活跃数已达上限，等待
+            if (this.active >= this.maxConcurrent) {
+                await new Promise(resolve => this.queue.push(resolve));
+            }
+            
+            this.active++;
+            try {
+                return await requestFn();
+            } finally {
+                this.active--;
+                // 启动下一个等待的请求
+                if (this.queue.length > 0) {
+                    const next = this.queue.shift();
+                    next();
+                }
+            }
+        }
+    }
+    
+    // 创建全局请求队列实例
+    const requestQueue = new RequestQueue(CONFIG.MAX_CONCURRENT_REQUESTS);
+    
+    // ==================== localStorage 缓存 ====================
+    
+    /**
+     * 从 localStorage 加载缓存
+     */
+    function loadCacheFromStorage() {
+        try {
+            const stored = localStorage.getItem(CONFIG.STORAGE_KEY);
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                const now = Date.now();
+                
+                // 只加载未过期的缓存
+                const validCache = {};
+                for (const [code, data] of Object.entries(parsed)) {
+                    if (data && data.timestamp && (now - data.timestamp) < CONFIG.CACHE_DURATION) {
+                        validCache[code] = data;
+                    }
+                }
+                
+                if (Object.keys(validCache).length > 0) {
+                    estimateCache = validCache;
+                    console.log(`[集思录溢价率] 从 localStorage 加载了 ${Object.keys(validCache).length} 条有效缓存`);
+                }
+            }
+        } catch (e) {
+            console.warn('[集思录溢价率] 加载 localStorage 缓存失败:', e.message);
+        }
+    }
+    
+    /**
+     * 保存缓存到 localStorage
+     */
+    function saveCacheToStorage() {
+        try {
+            localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(estimateCache));
+        } catch (e) {
+            console.warn('[集思录溢价率] 保存 localStorage 缓存失败:', e.message);
+        }
+    }
 
     function getCurrentPath() {
         const pathname = window.location.pathname;
@@ -131,12 +206,14 @@
     }
 
     /**
-     * 从天天基金API获取实时估值（增强版，含详细日志）
+     * 从天天基金API获取实时估值（性能优化版）
+     * 集成了：请求队列并发控制 + localStorage持久化缓存
      */
     async function fetchRealTimeEstimate(fundCode) {
         const cached = estimateCache[fundCode];
         const now = Date.now();
         
+        // 检查缓存
         if (cached && (now - cached.timestamp) < CONFIG.CACHE_DURATION) {
             if (CONFIG.DEBUG_MODE) {
                 const cacheAge = Math.round((now - cached.timestamp) / 1000);
@@ -144,79 +221,85 @@
             }
             return cached.value;
         }
-
-        const url = CONFIG.ESTIMATE_API + fundCode + '.js';
-        const requestTime = Date.now();
         
-        if (CONFIG.DEBUG_MODE) {
-            console.log(`[验证] ${fundCode} API请求: ${url}`);
-        }
-        
-        return new Promise((resolve) => {
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: url,
-                onload: function(response) {
-                    try {
-                        const responseTime = Date.now() - requestTime;
-                        const text = response.responseText;
-                        
-                        if (CONFIG.DEBUG_MODE) {
-                            console.log(`[验证] ${fundCode} API响应 (${responseTime}ms):`, text.substring(0, 200));
-                        }
-                        
-                        const match = text.match(/jsonpgz\((.*)\)/);
-                        
-                        if (match && match[1]) {
-                            const data = JSON.parse(match[1]);
-                            const estimateValue = parseFloat(data.gsz);
+        // 使用请求队列控制并发
+        return requestQueue.add(() => {
+            return new Promise((resolve) => {
+                const url = CONFIG.ESTIMATE_API + fundCode + '.js';
+                const requestTime = Date.now();
+                
+                if (CONFIG.DEBUG_MODE) {
+                    console.log(`[验证] ${fundCode} API请求: ${url}`);
+                }
+                
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: url,
+                    onload: function(response) {
+                        try {
+                            const responseTime = Date.now() - requestTime;
+                            const text = response.responseText;
                             
-                            if (!isNaN(estimateValue)) {
-                                estimateCache[fundCode] = {
-                                    value: estimateValue,
-                                    timestamp: now,
-                                    rawData: data
-                                };
+                            if (CONFIG.DEBUG_MODE) {
+                                console.log(`[验证] ${fundCode} API响应 (${responseTime}ms):`, text.substring(0, 200));
+                            }
+                            
+                            const match = text.match(/jsonpgz\((.*)\)/);
+                            
+                            if (match && match[1]) {
+                                const data = JSON.parse(match[1]);
+                                const estimateValue = parseFloat(data.gsz);
                                 
-                                if (CONFIG.DEBUG_MODE) {
-                                    console.log(`[验证] ${fundCode} 估值解析成功: gsz="${data.gsz}" → ${estimateValue}`);
-                                    console.log(`[验证] ${fundCode} 完整API数据:`, data);
+                                if (!isNaN(estimateValue)) {
+                                    // 更新内存缓存
+                                    estimateCache[fundCode] = {
+                                        value: estimateValue,
+                                        timestamp: now,
+                                        rawData: data
+                                    };
+                                    
+                                    // 保存到 localStorage
+                                    saveCacheToStorage();
+                                    
+                                    if (CONFIG.DEBUG_MODE) {
+                                        console.log(`[验证] ${fundCode} 估值解析成功: gsz="${data.gsz}" → ${estimateValue}`);
+                                    }
+                                    
+                                    resolve(estimateValue);
+                                    return;
+                                } else {
+                                    if (CONFIG.DEBUG_MODE) {
+                                        console.warn(`[验证] ${fundCode} 估值解析失败: gsz="${data.gsz}" 不是有效数字`);
+                                    }
                                 }
-                                
-                                resolve(estimateValue);
-                                return;
                             } else {
                                 if (CONFIG.DEBUG_MODE) {
-                                    console.warn(`[验证] ${fundCode} 估值解析失败: gsz="${data.gsz}" 不是有效数字`);
+                                    console.warn(`[验证] ${fundCode} JSONP解析失败: 未找到 jsonpgz(...) 格式`);
                                 }
                             }
-                        } else {
+                            
+                            resolve(null);
+                        } catch (error) {
                             if (CONFIG.DEBUG_MODE) {
-                                console.warn(`[验证] ${fundCode} JSONP解析失败: 未找到 jsonpgz(...) 格式`);
+                                console.error(`[验证] ${fundCode} 解析异常:`, error.message);
                             }
+                            resolve(null);
                         }
-                        
-                        resolve(null);
-                    } catch (error) {
+                    },
+                    onerror: function(error) {
                         if (CONFIG.DEBUG_MODE) {
-                            console.error(`[验证] ${fundCode} 解析异常:`, error.message);
+                            console.error(`[验证] ${fundCode} 网络错误:`, error.error || '未知错误');
                         }
                         resolve(null);
-                    }
-                },
-                onerror: function(error) {
-                    if (CONFIG.DEBUG_MODE) {
-                        console.error(`[验证] ${fundCode} 网络错误:`, error.error || '未知错误');
-                    }
-                    resolve(null);
-                },
-                ontimeout: function() {
-                    if (CONFIG.DEBUG_MODE) {
-                        console.error(`[验证] ${fundCode} 请求超时 (10s)`);
-                    }
-                    resolve(null);
-                },
-                timeout: 10000
+                    },
+                    ontimeout: function() {
+                        if (CONFIG.DEBUG_MODE) {
+                            console.error(`[验证] ${fundCode} 请求超时 (10s)`);
+                        }
+                        resolve(null);
+                    },
+                    timeout: 10000
+                });
             });
         });
     }
@@ -899,7 +982,10 @@
      * 初始化脚本
      */
     function init() {
-        console.log('[集思录溢价率] 开始初始化 v1.5.0 (含数据验证)');
+        console.log('[集思录溢价率] 开始初始化 v1.6.0 (性能优化版)');
+        
+        // 从 localStorage 加载缓存
+        loadCacheFromStorage();
         
         addDebugStyles();
         
