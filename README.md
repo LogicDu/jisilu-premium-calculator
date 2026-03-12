@@ -2,7 +2,7 @@
 
 [English](README_EN.md) | 简体中文
 
-[![Version](https://img.shields.io/badge/version-1.5.1-blue.svg)](https://github.com/LogicDu/jisilu-premium-calculator/releases)
+[![Version](https://img.shields.io/badge/version-1.6.0-blue.svg)](https://github.com/LogicDu/jisilu-premium-calculator/releases)
 
 一个用于集思录LOF/QDII基金页面的Tampermonkey脚本，可以自动计算并显示每只基金的溢价率，帮助投资者快速识别套利机会。
 
@@ -180,23 +180,19 @@ const CONFIG = {
 
 查看 [CHANGELOG.md](CHANGELOG.md) 了解版本更新历史。
 
-### 最新版本 v1.5.1 (2026-03-12)
+### 最新版本 v1.6.0 (2026-03-12)
 
+- ⚡ **性能优化**：大幅减少API请求，提升页面加载速度
+  - 请求队列并发控制：最多5个请求同时进行
+  - localStorage持久化缓存：刷新页面直接使用缓存
+  - 60秒缓存过期：保证数据时效性
 - 🐛 **稳定性修复**：修复脚本在非Tampermonkey环境中导致页面崩溃的问题
-  - 添加 GM_xmlhttpRequest 存在性检查
-  - 优化调试面板事件处理
 - ✨ **数据验证功能**：新增调试面板，点击单元格可查看数据来源和计算过程
-  - 显示原始API响应
-  - 显示计算公式和中间值
-  - 提供官方验证链接
-  - 显示数据时间戳和缓存状态
 - ✨ **实时估值功能**：新增"实时估值"列，显示基金盘中实时估值
   - 数据来源：天天基金网公开API
   - 估值时间：交易日9:30-15:00实时更新
   - 缓存机制：60秒缓存避免重复请求
 - 🔧 **溢价率计算优化**：使用实时估值计算溢价率，更加准确
-- 🔧 异步数据加载，不阻塞页面渲染
-- 🐛 修复 QDII 页面"商品"表格不显示溢价率列的问题
 
 ## 📄 开源协议
 
