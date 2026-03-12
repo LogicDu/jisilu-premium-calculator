@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         集思录溢价率计算
 // @namespace    https://github.com/LogicDu/jisilu-premium-calculator
-// @version      1.3.1
-// @description  在集思录 LOF/QDII 基金页面自动计算并显示溢价率，支持排序
+// @version      1.4.0
+// @description  在集思录 LOF/QDII 基金页面自动计算并显示溢价率，新增实时估值功能，支持排序
 // @author       LogicDu
 // @match        https://www.jisilu.cn/data/lof/*
 // @match        https://www.jisilu.cn/data/qdii/*
 // @icon         https://www.jisilu.cn/favicon.ico
-// @grant        none
+// @grant        GM_xmlhttpRequest
 // @license      MIT
 // @homepage     https://github.com/LogicDu/jisilu-premium-calculator
 // @supportURL   https://github.com/LogicDu/jisilu-premium-calculator/issues
@@ -17,16 +17,18 @@
 
 (function() {
     'use strict';
-
-    console.log('[集思录溢价率] 脚本已加载 v1.3.1');
+    console.log('[集思录溢价率] 脚本已加载 v1.4.0');
 
     // 通用配置
     const CONFIG = {
         COLUMN_NAME: '溢价率',
+        ESTIMATE_COLUMN_NAME: '实时估值',  // 新增：实时估值列名
         COLUMN_WIDTH: '80px',
         POSITIVE_COLOR: '#ff4444',  // 正溢价颜色（红色）
         NEGATIVE_COLOR: '#00aa00',  // 负溢价颜色（绿色）
         DECIMAL_PLACES: 2,          // 小数位数
+        ESTIMATE_API: 'https://fundgz.1234567.com.cn/js/',  // 天天基金实时估值API
+        CACHE_DURATION: 60000,      // 缓存时长（毫秒）：60秒
     };
 
     // 页面配置：根据路径和 hash 获取表格 ID 和列索引
@@ -58,7 +60,7 @@
     let currentTableIds = [];      // 当前 hash 对应的所有表格 ID（数组）
     let currentObservers = {};     // 每个表格独立的 observer，key 为 tableId
     let sortState = {};
-
+    let estimateCache = {};        // 实时估值缓存 { fundCode: { value, timestamp } }
     /**
      * 获取当前页面路径
      * @returns {string}
@@ -146,6 +148,68 @@
     }
 
     /**
+     * 从天天基金API获取实时估值
+     * @param {string} fundCode - 基金代码
+     * @returns {Promise<number|null>} 实时估值或null
+     */
+    async function fetchRealTimeEstimate(fundCode) {
+        // 检查缓存
+        const cached = estimateCache[fundCode];
+        const now = Date.now();
+        if (cached && (now - cached.timestamp) < CONFIG.CACHE_DURATION) {
+            console.log(`[集思录溢价率] 使用缓存: ${fundCode} = ${cached.value}`);
+            return cached.value;
+        }
+
+        const url = CONFIG.ESTIMATE_API + fundCode + '.js';
+        console.log(`[集思录溢价率] 请求实时估值: ${url}`);
+        
+        return new Promise((resolve) => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: url,
+                onload: function(response) {
+                    try {
+                        const text = response.responseText;
+                        // 解析JSONP格式: jsonpgz({...})
+                        const match = text.match(/jsonpgz\((.*)\)/);
+                        
+                        if (match && match[1]) {
+                            const data = JSON.parse(match[1]);
+                            const estimateValue = parseFloat(data.gsz);
+                            
+                            if (!isNaN(estimateValue)) {
+                                // 更新缓存
+                                estimateCache[fundCode] = {
+                                    value: estimateValue,
+                                    timestamp: now
+                                };
+                                console.log(`[集思录溢价率] 获取成功: ${fundCode} = ${estimateValue}`);
+                                resolve(estimateValue);
+                                return;
+                            }
+                        }
+                        
+                        resolve(null);
+                    } catch (error) {
+                        console.error(`[集思录溢价率] 解析响应失败 (${fundCode}):`, error.message);
+                        resolve(null);
+                    }
+                },
+                onerror: function(error) {
+                    console.error(`[集思录溢价率] 请求失败 (${fundCode}):`, error.error || '网络错误');
+                    resolve(null);
+                },
+                ontimeout: function() {
+                    console.error(`[集思录溢价率] 请求超时 (${fundCode})`);
+                    resolve(null);
+                },
+                timeout: 10000  // 10秒超时
+            });
+        });
+    }
+
+    /**
      * 在表格头部添加溢价率列
      * @param {HTMLTableElement} table - 表格元素
      * @param {Object} tableConfig - 表格配置
@@ -173,11 +237,15 @@
         }
 
         // 检查是否已添加
-        const existingHeader = Array.from(headerRow.querySelectorAll('th')).find(
+        const existingEstimateHeader = Array.from(headerRow.querySelectorAll('th')).find(
+            th => th.textContent.trim().replace(/[↑↓]/g, '') === CONFIG.ESTIMATE_COLUMN_NAME
+        );
+        const existingPremiumHeader = Array.from(headerRow.querySelectorAll('th')).find(
             th => th.textContent.trim().replace(/[↑↓]/g, '') === CONFIG.COLUMN_NAME
         );
-        if (existingHeader) {
-            console.log('[集思录溢价率] 溢价率列已存在');
+        
+        if (existingEstimateHeader && existingPremiumHeader) {
+            console.log('[集思录溢价率] 列已存在');
             return true;
         }
 
@@ -190,49 +258,77 @@
             return false;
         }
 
-        const newHeader = document.createElement('th');
-        newHeader.className = 'header sticky';
-        newHeader.innerHTML = `<span class="premium-header-text">${CONFIG.COLUMN_NAME}</span><span class="premium-sort-indicator"></span>`;
-        newHeader.style.cssText = `
-            width: ${CONFIG.COLUMN_WIDTH};
-            text-align: center;
-            cursor: pointer;
-            user-select: none;
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-            background-color: rgb(134, 197, 227);
-        `;
-        newHeader.setAttribute('data-premium-column', 'true');
-        
-        // 添加排序样式（只添加一次）
-        if (!document.querySelector('style[data-premium-styles]')) {
-            const style = document.createElement('style');
-            style.textContent = `
-                .premium-sort-indicator {
-                    margin-left: 4px;
-                    font-size: 12px;
-                }
-                .premium-sort-indicator.asc::after {
-                    content: '↑';
-                    color: #333;
-                }
-                .premium-sort-indicator.desc::after {
-                    content: '↓';
-                    color: #333;
-                }
-                th[data-premium-column="true"]:hover {
-                    background-color: rgb(114, 177, 207) !important;
-                }
+        // 先添加“实时估值”列
+        if (!existingEstimateHeader) {
+            const estimateHeader = document.createElement('th');
+            estimateHeader.className = 'header sticky';
+            estimateHeader.innerHTML = `<span class="estimate-header-text">${CONFIG.ESTIMATE_COLUMN_NAME}</span>`;
+            estimateHeader.style.cssText = `
+                width: 70px;
+                text-align: center;
+                position: sticky;
+                top: 0;
+                z-index: 1000;
+                background-color: rgb(134, 197, 227);
             `;
-            style.setAttribute('data-premium-styles', 'true');
-            document.head.appendChild(style);
+            estimateHeader.setAttribute('data-estimate-column', 'true');
+            navHeader.after(estimateHeader);
+            console.log('[集思录溢价率] 实时估值列表头已添加');
         }
 
-        // 添加点击排序事件
-        newHeader.addEventListener('click', () => handleSortClick(table, tableConfig));
+        // 再添加“溢价率”列（在实时估值列后面）
+        if (!existingPremiumHeader) {
+            const newHeader = document.createElement('th');
+            newHeader.className = 'header sticky';
+            newHeader.innerHTML = `<span class="premium-header-text">${CONFIG.COLUMN_NAME}</span><span class="premium-sort-indicator"></span>`;
+            newHeader.style.cssText = `
+                width: ${CONFIG.COLUMN_WIDTH};
+                text-align: center;
+                cursor: pointer;
+                user-select: none;
+                position: sticky;
+                top: 0;
+                z-index: 1000;
+                background-color: rgb(134, 197, 227);
+            `;
+            newHeader.setAttribute('data-premium-column', 'true');
+            
+            // 添加排序样式（只添加一次）
+            if (!document.querySelector('style[data-premium-styles]')) {
+                const style = document.createElement('style');
+                style.textContent = `
+                    .premium-sort-indicator {
+                        margin-left: 4px;
+                        font-size: 12px;
+                    }
+                    .premium-sort-indicator.asc::after {
+                        content: '↑';
+                        color: #333;
+                    }
+                    .premium-sort-indicator.desc::after {
+                        content: '↓';
+                        color: #333;
+                    }
+                    th[data-premium-column="true"]:hover {
+                        background-color: rgb(114, 177, 207) !important;
+                    }
+                `;
+                style.setAttribute('data-premium-styles', 'true');
+                document.head.appendChild(style);
+            }
 
-        navHeader.after(newHeader);
+            // 添加点击排序事件
+            newHeader.addEventListener('click', () => handleSortClick(table, tableConfig));
+
+            // 获取刚插入的实时估值列表头，在其后插入溢价率列
+            const estimateHeader = headerRow.querySelector('th[data-estimate-column="true"]');
+            if (estimateHeader) {
+                estimateHeader.after(newHeader);
+            } else {
+                navHeader.after(newHeader);
+            }
+            console.log('[集思录溢价率] 溢价率列表头已添加');
+        }
 
         console.log('[集思录溢价率] 表头已添加');
         return true;
@@ -292,9 +388,8 @@
 
         const rows = Array.from(tbody.querySelectorAll('tr'));
         
-        // 溢价率列的索引（净值列索引 + 1）
-        const premiumIndex = tableConfig.navIndex + 1;
-
+        // 溢价率列的索引（净值列索引 + 2，因为中间有实时估值列）
+        const premiumIndex = tableConfig.navIndex + 2;
         rows.sort((a, b) => {
             const aCell = a.querySelectorAll('td')[premiumIndex];
             const bCell = b.querySelectorAll('td')[premiumIndex];
@@ -316,19 +411,31 @@
     }
 
     /**
-     * 为表格行添加溢价率数据
+     * 为表格行添加溢价率数据（异步版本）
      * @param {HTMLElement} row - 表格行元素
      * @param {Object} tableConfig - 表格配置
      */
-    function addPremiumDataToRow(row, tableConfig) {
+    async function addPremiumDataToRow(row, tableConfig) {
         // 检查是否已添加
-        if (row.querySelector('[data-premium-cell="true"]')) {
+        if (row.querySelector('[data-estimate-cell="true"]') && 
+            row.querySelector('[data-premium-cell="true"]')) {
             return;
         }
 
         // 获取所有单元格
         const cells = row.querySelectorAll('td');
         if (cells.length <= tableConfig.navIndex) {
+            return;
+        }
+
+        // 获取基金代码（从第一列的链接或文本中提取）
+        const fundCodeCell = cells[0];
+        const fundCodeLink = fundCodeCell.querySelector('a');
+        const fundCode = fundCodeLink ? 
+            fundCodeLink.textContent.trim() : 
+            fundCodeCell.textContent.trim();
+        
+        if (!fundCode || fundCode.length < 6) {
             return;
         }
 
@@ -341,28 +448,70 @@
         }
 
         const priceText = priceCell.textContent.trim();
-        const navText = navCell.textContent.trim();
-
         const price = parseFloat(priceText);
-        const nav = parseFloat(navText);
 
-        // 计算溢价率
-        const premiumRate = calculatePremiumRate(price, nav);
-        const formattedRate = formatPremiumRate(premiumRate);
-        const color = getPremiumColor(premiumRate);
+        // 创建并插入“实时估值”单元格
+        if (!row.querySelector('[data-estimate-cell="true"]')) {
+            const estimateCell = document.createElement('td');
+            estimateCell.textContent = '加载中...';
+            estimateCell.style.textAlign = 'center';
+            estimateCell.style.color = '#666';
+            estimateCell.setAttribute('data-estimate-cell', 'true');
+            estimateCell.setAttribute('data-fund-code', fundCode);
+            navCell.after(estimateCell);
 
-        // 创建新单元格
-        const newCell = document.createElement('td');
-        newCell.textContent = formattedRate;
-        newCell.style.textAlign = 'center';
-        newCell.style.color = color;
-        newCell.style.fontWeight = 'bold';
-        newCell.setAttribute('data-premium-cell', 'true');
-        newCell.setAttribute('data-premium-rate', premiumRate !== null ? premiumRate : '');
-        newCell.setAttribute('data-name', 'premium_rate');
+            // 异步获取实时估值
+            const estimateValue = await fetchRealTimeEstimate(fundCode);
+            
+            if (estimateValue !== null) {
+                estimateCell.textContent = estimateValue.toFixed(4);
+                estimateCell.style.color = '#0066cc';
+                estimateCell.setAttribute('data-estimate-value', estimateValue);
+            } else {
+                estimateCell.textContent = '-';
+                estimateCell.style.color = '#999';
+            }
+        }
 
-        // 在净值列后面插入
-        navCell.after(newCell);
+        // 创建并插入“溢价率”单元格
+        if (!row.querySelector('[data-premium-cell="true"]')) {
+            const premiumCell = document.createElement('td');
+            premiumCell.textContent = '计算中...';
+            premiumCell.style.textAlign = 'center';
+            premiumCell.style.fontWeight = 'bold';
+            premiumCell.setAttribute('data-premium-cell', 'true');
+            premiumCell.setAttribute('data-fund-code', fundCode);
+            
+            // 获取实时估值（从刚插入的单元格或缓存）
+            const estimateCell = row.querySelector('[data-estimate-cell="true"]');
+            const estimateValue = estimateCell ? 
+                parseFloat(estimateCell.getAttribute('data-estimate-value')) : null;
+            
+            // 使用实时估值计算溢价率
+            let premiumRate = null;
+            if (estimateValue !== null && !isNaN(estimateValue)) {
+                premiumRate = calculatePremiumRate(price, estimateValue);
+            }
+            
+            if (premiumRate !== null) {
+                const formattedRate = formatPremiumRate(premiumRate);
+                const color = getPremiumColor(premiumRate);
+                premiumCell.textContent = formattedRate;
+                premiumCell.style.color = color;
+                premiumCell.setAttribute('data-premium-rate', premiumRate);
+            } else {
+                premiumCell.textContent = '-';
+                premiumCell.style.color = '#999';
+                premiumCell.setAttribute('data-premium-rate', '');
+            }
+
+            // 在实时估值列后面插入溢价率列
+            if (estimateCell) {
+                estimateCell.after(premiumCell);
+            } else {
+                navCell.after(premiumCell);
+            }
+        }
     }
 
     /**
@@ -370,15 +519,19 @@
      * @param {HTMLTableElement} table - 表格元素
      * @param {Object} tableConfig - 表格配置
      */
-    function processAllRows(table, tableConfig) {
+    async function processAllRows(table, tableConfig) {
         if (!table) {
             return;
         }
 
         const rows = table.querySelectorAll('tbody tr');
-        rows.forEach(row => {
-            addPremiumDataToRow(row, tableConfig);
-        });
+        
+        // 使用 Promise.all 并行处理所有行
+        const promises = Array.from(rows).map(row => 
+            addPremiumDataToRow(row, tableConfig)
+        );
+        
+        await Promise.all(promises);
 
         console.log(`[集思录溢价率] 已处理 ${rows.length} 行数据`);
     }
@@ -405,7 +558,10 @@
                 if (mutation.type === 'childList') {
                     mutation.addedNodes.forEach((node) => {
                         if (node.nodeType === 1 && node.tagName === 'TR') {
-                            addPremiumDataToRow(node, tableConfig);
+                            // 异步处理，不等待结果
+                            addPremiumDataToRow(node, tableConfig).catch(err => {
+                                console.error('[集思录溢价率] 处理新行失败:', err);
+                            });
                         }
                     });
                 }
@@ -482,7 +638,10 @@
                 console.log(`[集思录溢价率] 表格 #${tableId} 已找到，开始处理`);
 
                 if (addPremiumColumnHeader(table, tableConfig)) {
-                    processAllRows(table, tableConfig);
+                    // 异步处理所有行
+                    processAllRows(table, tableConfig).catch(err => {
+                        console.error('[集思录溢价率] 处理行失败:', err);
+                    });
                     observeTableChanges(table, tableConfig, tableId);
                 }
                 
