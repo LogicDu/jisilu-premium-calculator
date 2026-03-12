@@ -9,7 +9,8 @@ A Tampermonkey userscript that automatically calculates and displays premium rat
 ## ✨ Features
 
 - ✅ **Auto-add Premium Column** - Seamlessly inserts premium rate data into the existing table
-- ✅ **Real-time Calculation** - Calculates premium rates based on market price and NAV
+- ✅ **Real-time Estimate** - New column showing fund's intraday real-time estimate (Data source: TianTian Fund)
+- ✅ **Real-time Calculation** - Calculates premium rates based on market price and real-time estimate, more accurate
 - ✅ **Smart Updates** - Syncs with manual and auto-refresh
 - ✅ **Color Coding** - Red for premium, green for discount, easy to read
 - ✅ **Click to Sort** - Support sorting by premium rate (desc → asc → cancel)
@@ -20,16 +21,18 @@ A Tampermonkey userscript that automatically calculates and displays premium rat
 ## 📊 Premium Rate Formula
 
 ```
-Premium Rate = (Market Price - NAV) / NAV × 100%
+Premium Rate = (Market Price - Real-time Estimate) / Real-time Estimate × 100%
 ```
 
 **Field Explanation:**
 - **Market Price**: Trading price on secondary market
-- **NAV**: Net Asset Value per unit
+- **Real-time Estimate**: Fund's intraday real-time estimate (Data source: TianTian Fund)
 
 **Premium Rate Meaning:**
-- **Positive (+)**: Market Price > NAV, potential arbitrage opportunity
-- **Negative (-)**: Market Price < NAV, potential buying opportunity
+- **Positive (+)**: Market Price > Real-time Estimate, potential arbitrage opportunity
+- **Negative (-)**: Market Price < Real-time Estimate, potential buying opportunity
+
+> 💡 **Note**: Starting from v1.4.0, premium rate is calculated based on real-time estimate instead of T-1 NAV. Real-time estimate data is from TianTian Fund public API, updated during trading hours (9:30-15:00).
 
 ## 🚀 Quick Start
 
@@ -95,6 +98,7 @@ jisilu-premium-calculator/
 - **Data Parsing** - Extract price and NAV from page elements
 - **Real-time Calculation** - Use precise mathematical formula
 - **Sorting Feature** - Support click header to sort by premium rate
+- **GM_xmlhttpRequest** - Bypass CORS restrictions to fetch third-party API data
 
 ### Workflow
 
@@ -127,6 +131,7 @@ A: Possible reasons:
 - Missing NAV data
 - Newly listed fund without NAV data yet
 - Data format exception
+- Real-time estimate API request failed
 
 Solution: Wait for data update or refresh page
 </details>
@@ -148,9 +153,12 @@ A: Open script editor and modify the `CONFIG` object:
 ```javascript
 const CONFIG = {
     COLUMN_NAME: 'Premium',
+    ESTIMATE_COLUMN_NAME: 'Estimate',    // Real-time estimate column name
     POSITIVE_COLOR: '#ff4444',  // Premium color
     NEGATIVE_COLOR: '#00aa00',  // Discount color
     DECIMAL_PLACES: 2,          // Decimal places
+    ESTIMATE_API: 'https://fundgz.1234567.com.cn/js/',  // Estimate API
+    CACHE_DURATION: 60000,      // Cache duration (ms)
 };
 ```
 </details>
@@ -173,12 +181,15 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.
 
-### Latest Version v1.3.0 (2026-03-11)
+### Latest Version v1.4.0 (2026-03-12)
 
-- ✨ Support QDII fund page
-- ✨ Add click header sorting feature
-- ✨ Fix sticky header display issue
-- ✨ Dynamic detect active table
+- ✨ **Real-time Estimate Feature**: New "Real-time Estimate" column showing intraday fund estimates
+  - Data source: TianTian Fund public API
+  - Update time: Real-time during trading hours 9:30-15:00
+  - Cache mechanism: 60-second cache to avoid duplicate requests
+- 🔧 **Premium Rate Optimization**: Calculate premium rate using real-time estimate, more accurate
+- 🔧 Async data loading, non-blocking page rendering
+- 🐛 Fix QDII page "Commodity" table not showing premium rate column
 
 ## 📄 License
 
@@ -199,6 +210,7 @@ This project is licensed under [MIT License](LICENSE).
 ## 🙏 Acknowledgments
 
 - Thanks to [Jisilu](https://www.jisilu.cn/) for providing quality data services
+- Thanks to [TianTian Fund](https://fund.eastmoney.com/) for providing real-time estimate API
 - Thanks to [Tampermonkey](https://www.tampermonkey.net/) team for the powerful tool
 - Thanks to all contributors for their support
 

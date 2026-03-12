@@ -3,7 +3,7 @@
 [English](README_EN.md) | 简体中文
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://github.com/LogicDu/jisilu-premium-calculator/releases)
+[![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)](https://github.com/LogicDu/jisilu-premium-calculator/releases)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-4.0+-green.svg)](https://www.tampermonkey.net/)
 
 一个用于集思录LOF/QDII基金页面的Tampermonkey脚本，可以自动计算并显示每只基金的溢价率，帮助投资者快速识别套利机会。
@@ -13,7 +13,8 @@
 ## ✨ 功能特性
 
 - ✅ **自动添加溢价率列** - 在原有表格中无缝插入溢价率数据
-- ✅ **实时计算** - 根据场内价格和基金净值实时计算溢价率
+- ✅ **实时估值功能** - 新增实时估值列，显示基金盘中实时估值（数据来源：天天基金网）
+- ✅ **实时计算** - 根据场内价格和实时估值计算溢价率，更加准确
 - ✅ **智能更新** - 支持手动刷新和自动刷新时同步更新数据
 - ✅ **颜色标识** - 正溢价显示红色，负溢价显示绿色，一目了然
 - ✅ **点击排序** - 支持点击表头按溢价率排序（降序→升序→取消）
@@ -24,16 +25,18 @@
 ## 📊 溢价率计算公式
 
 ```
-溢价率 = (场内实时价 - 基金净值) / 基金净值 × 100%
+溢价率 = (场内实时价 - 实时估值) / 实时估值 × 100%
 ```
 
 **字段说明：**
 - **场内实时价**：基金在二级市场的交易价格
-- **基金净值**：基金的单位净值
+- **实时估值**：基金盘中实时估值（数据来源：天天基金网）
 
 **溢价率含义：**
-- **正溢价（+）**：场内价格 > 净值，可能存在套利空间
-- **负溢价（-）**：场内价格 < 净值，可能是买入机会
+- **正溢价（+）**：场内价格 > 实时估值，可能存在套利空间
+- **负溢价（-）**：场内价格 < 实时估值，可能是买入机会
+
+> 💡 **说明**：v1.4.0起，溢价率基于实时估值计算，而非T-1日净值。实时估值数据来源于天天基金网公开API，交易日9:30-15:00实时更新。
 
 ## 🚀 快速开始
 
@@ -91,10 +94,13 @@ jisilu-premium-calculator/
 ```javascript
 const CONFIG = {
     COLUMN_NAME: '溢价率',           // 列名
+    ESTIMATE_COLUMN_NAME: '实时估值', // 实时估值列名
     COLUMN_WIDTH: '80px',            // 列宽
     POSITIVE_COLOR: '#ff4444',       // 正溢价颜色（红色）
     NEGATIVE_COLOR: '#00aa00',       // 负溢价颜色（绿色）
     DECIMAL_PLACES: 2,               // 小数位数
+    ESTIMATE_API: 'https://fundgz.1234567.com.cn/js/',  // 实时估值API
+    CACHE_DURATION: 60000,           // 缓存时长（毫秒）
 };
 ```
 
@@ -105,6 +111,7 @@ const CONFIG = {
 - **数据解析** - 从页面元素中提取价格和净值数据
 - **实时计算** - 使用精确的数学公式计算溢价率
 - **排序功能** - 支持点击表头按溢价率排序
+- **GM_xmlhttpRequest** - 绕过CORS限制获取第三方API数据
 
 详细技术说明请查看 [开发文档](docs/DEVELOPMENT.md)
 
@@ -133,6 +140,7 @@ const CONFIG = {
 - 基金净值数据缺失
 - 新上市基金尚未有净值数据
 - 数据格式异常
+- 实时估值API请求失败
 
 解决方法：等待数据更新或刷新页面
 </details>
@@ -173,12 +181,15 @@ const CONFIG = {
 
 查看 [CHANGELOG.md](CHANGELOG.md) 了解版本更新历史。
 
-### 最新版本 v1.3.0 (2026-03-11)
+### 最新版本 v1.4.0 (2026-03-12)
 
-- ✨ 支持QDII基金页面
-- ✨ 添加点击表头排序功能
-- ✨ 修复表头悬浮显示问题
-- ✨ 动态识别当前激活表格
+- ✨ **实时估值功能**：新增"实时估值"列，显示基金盘中实时估值
+  - 数据来源：天天基金网公开API
+  - 估值时间：交易日9:30-15:00实时更新
+  - 缓存机制：60秒缓存避免重复请求
+- 🔧 **溢价率计算优化**：使用实时估值计算溢价率，更加准确
+- 🔧 异步数据加载，不阻塞页面渲染
+- 🐛 修复 QDII 页面"商品"表格不显示溢价率列的问题
 
 ## 📄 开源协议
 
@@ -199,6 +210,7 @@ const CONFIG = {
 ## 🙏 致谢
 
 - 感谢 [集思录](https://www.jisilu.cn/) 提供的优质数据服务
+- 感谢 [天天基金](https://fund.eastmoney.com/) 提供实时估值API
 - 感谢 [Tampermonkey](https://www.tampermonkey.net/) 团队提供的强大工具
 - 感谢所有贡献者的支持和帮助
 
