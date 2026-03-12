@@ -2,9 +2,7 @@
 
 [English](README_EN.md) | 简体中文
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)](https://github.com/LogicDu/jisilu-premium-calculator/releases)
-[![Tampermonkey](https://img.shields.io/badge/Tampermonkey-4.0+-green.svg)](https://www.tampermonkey.net/)
+[![Version](https://img.shields.io/badge/version-1.5.1-blue.svg)](https://github.com/LogicDu/jisilu-premium-calculator/releases)
 
 一个用于集思录LOF/QDII基金页面的Tampermonkey脚本，可以自动计算并显示每只基金的溢价率，帮助投资者快速识别套利机会。
 
@@ -20,6 +18,7 @@
 - ✅ **点击排序** - 支持点击表头按溢价率排序（降序→升序→取消）
 - ✅ **多页面支持** - 支持LOF和QDII两个基金页面
 - ✅ **表头悬浮** - 正确支持表头置顶悬浮显示
+- ✅ **数据验证** - 点击单元格查看数据来源和计算过程，支持官方验证
 - ✅ **轻量高效** - 纯JavaScript实现，无外部依赖，不影响页面性能
 
 ## 📊 溢价率计算公式
@@ -181,8 +180,16 @@ const CONFIG = {
 
 查看 [CHANGELOG.md](CHANGELOG.md) 了解版本更新历史。
 
-### 最新版本 v1.4.0 (2026-03-12)
+### 最新版本 v1.5.1 (2026-03-12)
 
+- 🐛 **稳定性修复**：修复脚本在非Tampermonkey环境中导致页面崩溃的问题
+  - 添加 GM_xmlhttpRequest 存在性检查
+  - 优化调试面板事件处理
+- ✨ **数据验证功能**：新增调试面板，点击单元格可查看数据来源和计算过程
+  - 显示原始API响应
+  - 显示计算公式和中间值
+  - 提供官方验证链接
+  - 显示数据时间戳和缓存状态
 - ✨ **实时估值功能**：新增"实时估值"列，显示基金盘中实时估值
   - 数据来源：天天基金网公开API
   - 估值时间：交易日9:30-15:00实时更新
